@@ -279,36 +279,58 @@ def make_so_cache_key(version_hash, signature, constants, ids, **kwargs):
 @functools.lru_cache()
 def triton_key():
     import pkgutil
-    TRITON_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    import sys
+    # This file lives under .../spec/triton/runtime/cache.py.
+    # spec/triton/ is the mthreads overlay (takes priority).
+    # The compiled _C/ and base backends/ live under the main triton package.
+    TRITON_PATH = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))  # spec/triton
+    _main_triton = os.path.dirname(os.path.abspath(sys.modules['triton'].__file__))  # main triton root
+
     contents = []
     # frontend
     with open(__file__, "rb") as f:
         contents += [hashlib.sha256(f.read()).hexdigest()]
-    # compiler
-    path_prefixes = [
+
+    # compiler & backends — spec overlay first, main triton for the rest
+    _seen = set()
+    for path, prefix in [
         (os.path.join(TRITON_PATH, "compiler"), "triton.compiler."),
-        (os.path.join(TRITON_PATH, "backends"), "triton.backends."),
-    ]
-    for path, prefix in path_prefixes:
+        (os.path.join(_main_triton, "compiler"), "triton.compiler."),
+        (os.path.join(_main_triton, "backends"), "triton.backends."),
+    ]:
+        if not os.path.isdir(path):
+            continue
         for lib in pkgutil.walk_packages([path], prefix=prefix):
+            if lib.name in _seen:
+                continue
+            _seen.add(lib.name)
             with open(lib.module_finder.find_spec(lib.name).origin, "rb") as f:
                 contents += [hashlib.sha256(f.read()).hexdigest()]
 
-    # backend
+    # backend native library — from main triton package
     libtriton_hash = hashlib.sha256()
     ext = sysconfig.get_config_var("EXT_SUFFIX").split(".")[-1]
-    with open(os.path.join(TRITON_PATH, "_C", f"libtriton.{ext}"), "rb") as f:
+    with open(os.path.join(_main_triton, "_C", f"libtriton.{ext}"), "rb") as f:
         while True:
             chunk = f.read(1024**2)
             if not chunk:
                 break
             libtriton_hash.update(chunk)
     contents.append(libtriton_hash.hexdigest())
-    # language
-    language_path = os.path.join(TRITON_PATH, 'language')
-    for lib in pkgutil.walk_packages([language_path], prefix="triton.language."):
-        with open(lib.module_finder.find_spec(lib.name).origin, "rb") as f:
-            contents += [hashlib.sha256(f.read()).hexdigest()]
+
+    # language — spec overlay first, main triton for the rest
+    for language_path in [
+            os.path.join(TRITON_PATH, 'language'),
+            os.path.join(_main_triton, 'language'),
+    ]:
+        if not os.path.isdir(language_path):
+            continue
+        for lib in pkgutil.walk_packages([language_path], prefix="triton.language."):
+            if lib.name in _seen:
+                continue
+            _seen.add(lib.name)
+            with open(lib.module_finder.find_spec(lib.name).origin, "rb") as f:
+                contents += [hashlib.sha256(f.read()).hexdigest()]
     return f'{__version__}' + '-'.join(contents)
 
 

@@ -1,6 +1,11 @@
 """isort:skip_file"""
 # Import order is significant here.
 
+from triton.flagtree_spec import spec_path, spec
+
+# flagtree backend path specialization
+spec_path(__path__)
+
 from . import math
 from . import extra
 from ..backends import language_extensions as ext
@@ -136,6 +141,9 @@ from .random import (
     uint_to_uniform_float,
 )
 from . import target_info
+
+# flagtree backend specialization
+spec("language_extend_globals", globals())
 
 __all__ = [
     "PropagateNan",
