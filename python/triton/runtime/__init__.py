@@ -8,6 +8,7 @@ from .cache import RedisRemoteCacheBackend, RemoteCacheBackend
 from .driver import driver
 from .jit import JITFunction, KernelInterface, MockTensor, TensorWrapper, reinterpret
 from .errors import OutOfResources, InterpreterError
+from ._distributed import DistributedRtContext
 
 __all__ = [
     "autotune",
@@ -25,4 +26,6 @@ __all__ = [
     "reinterpret",
     "RemoteCacheBackend",
     "TensorWrapper",
+    # flagtree tle distributed
+    "DistributedRtContext",
 ]
