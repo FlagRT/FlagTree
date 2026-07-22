@@ -712,6 +712,18 @@ else:
 #backends = [*BackendInstaller.copy(["nvidia", "amd"]), *BackendInstaller.copy_externals()]
 
 
+# flagtree: extend yield "triton.backends.{backend.name}"
+def get_backend_packages(backend):
+    package_prefix = f"triton.backends.{backend.name}"
+    for root, dirs, _files in os.walk(backend.backend_dir):
+        dirs[:] = sorted(directory for directory in dirs if directory != "__pycache__" and directory.isidentifier())
+        relative_dir = os.path.relpath(root, backend.backend_dir)
+        package = package_prefix
+        if relative_dir != ".":
+            package += "." + relative_dir.replace(os.sep, ".")
+        yield package, root
+
+
 def get_package_dirs():
     yield ("", "python")
 
@@ -723,7 +735,9 @@ def get_package_dirs():
         if backend.is_external:
             continue
 
-        yield (f"triton.backends.{backend.name}", backend.backend_dir)
+        # flagtree: extend yield "triton.backends.{backend.name}"
+        # yield (f"triton.backends.{backend.name}", backend.backend_dir)
+        yield from get_backend_packages(backend)
 
         if backend.language_dir:
             # Install the contents of each backend's `language` directory into
@@ -755,9 +769,15 @@ def get_packages():
     # yield these directories to avoid warnings
     yield "triton._C"
     yield "triton._C.libtriton"
+    yield "triton.tools.triton_to_gluon_translater"
 
     for backend in backends:
-        yield f"triton.backends.{backend.name}"
+        # flagtree: extend yield "triton.backends.{backend.name}"
+        if backend.is_external:
+            yield f"triton.backends.{backend.name}"
+        else:
+            for package, _source_dir in get_backend_packages(backend):
+                yield package
 
         if backend.language_dir:
             # Install the contents of each backend's `language` directory into
