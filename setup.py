@@ -715,6 +715,9 @@ else:
 def get_package_dirs():
     yield ("", "python")
 
+    # flagtree backend specialization
+    yield from helper.SpecPackageHelper.get_spec_packages()
+
     for backend in backends:
         # we use symlinks for external plugins
         if backend.is_external:
@@ -740,7 +743,18 @@ def get_package_dirs():
 
 
 def get_packages():
-    yield from find_packages(where="python", include=["triton", "triton.*"])
+    # flagtree backend specialization: add excluded packages
+    yield from find_packages(where="python", include=["triton", "triton.*"],
+                             exclude=helper.SpecPackageHelper.get_excluded_packages())
+
+    # flagtree backend specialization
+    for package, _source_dir in helper.SpecPackageHelper.get_spec_packages():
+        yield package
+
+    # flagtree: these directories are without __init__.py
+    # yield these directories to avoid warnings
+    yield "triton._C"
+    yield "triton._C.libtriton"
 
     for backend in backends:
         yield f"triton.backends.{backend.name}"
@@ -954,6 +968,7 @@ setup(
     packages=list(get_packages()),
     package_dir=dict(get_package_dirs()),
     package_data=get_package_data(),
+    exclude_package_data=helper.get_excluded_package_data(),
     entry_points=get_entry_points(),
     include_package_data=True,
     ext_modules=[CMakeExtension("triton", "triton/_C/")],
