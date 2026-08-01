@@ -20,8 +20,10 @@
 # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 # SOFTWARE.
 
+SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
 source ~/env.sh
-source ${BENCH_SCRIPT_DIR}/disable_proxy.sh
+source "${SCRIPT_DIR}/disable_local_proxy.sh"
 
 python3 -m pip show flag_gems |grep Version
 python3 -m pip show flagtree |grep Version
@@ -32,11 +34,11 @@ if [[ -f "$PID_FILE" ]]; then
     if [[ "$pid" =~ ^[0-9]+$ ]]; then
         if kill -0 "$pid" 2>/dev/null; then
             echo "[WARNING] Service already running: pid = $pid."
-            bash ${BENCH_SCRIPT_DIR}/stop.sh
+            bash ${SCRIPT_DIR}/stop.sh
         fi
     fi
 fi
-bash ${BENCH_SCRIPT_DIR}/clear_fuser_process.sh
+bash "${SCRIPT_DIR}/clear_fuser_process.sh"
 
 start=$(date +%s)
 
