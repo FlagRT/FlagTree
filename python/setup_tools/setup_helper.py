@@ -86,13 +86,70 @@ def init_backends(backend_installer):
 # flagtree: extend yield "triton.backends.{backend.name}"
 def get_backend_packages(backend):
     package_prefix = f"triton.backends.{backend.name}"
+    excluded_dirs = set()
+    if backend.name == "nvidia" and flagtree_backend not in ("", "nvidia", "tileir"):
+        excluded_dirs = {"bin", "include", "lib.cupti"}
+
     for root, dirs, _files in os.walk(backend.backend_dir):
-        dirs[:] = sorted(directory for directory in dirs if directory != "__pycache__" and directory.isidentifier())
         relative_dir = os.path.relpath(root, backend.backend_dir)
+        dirs[:] = sorted(directory for directory in dirs
+                         if directory != "__pycache__" and directory.isidentifier() and (
+                             directory if relative_dir == "." else f"{relative_dir.replace(os.sep, '.')}.{directory}"
+                         ) not in excluded_dirs)
         package = package_prefix
         if relative_dir != ".":
             package += "." + relative_dir.replace(os.sep, ".")
         yield package, root
+
+
+def get_generated_backend_packages(backend):
+    """Declare data directories created after setuptools scans packages."""
+    if backend.name == "nvidia" and flagtree_backend not in ("", "nvidia", "tileir"):
+        return
+
+    generated_package_suffixes = {
+        "nvidia": (
+            "bin",
+            "include",
+            "include.Openacc",
+            "include.Openmp",
+            "include.cooperative_groups",
+            "include.cooperative_groups.details",
+            "include.crt",
+            "lib.cupti",
+        ),
+        "xpu": (
+            "xpu3",
+            "xpu3.bin",
+            "xpu3.include",
+            "xpu3.include.crt",
+            "xpu3.include.cuda_etbl",
+            "xpu3.include.xpu",
+            "xpu3.include.xpurt_priv",
+            "xpu3.lib",
+            "xpu3.lib.linux",
+            "xpu3.so",
+        ),
+    }
+    package_prefix = f"triton.backends.{backend.name}"
+    for suffix in generated_package_suffixes.get(backend.name, ()):
+        source_dir = Path(backend.backend_dir).joinpath(*suffix.split("."))
+        if source_dir.is_dir():
+            yield f"{package_prefix}.{suffix}"
+
+
+def refresh_generated_backend_packages(build_py_command, backends):
+    packages = list(build_py_command.distribution.packages or [])
+    known_packages = set(packages)
+    for backend in backends:
+        if backend.is_external:
+            continue
+        for package in get_generated_backend_packages(backend):
+            if package not in known_packages:
+                packages.append(package)
+                known_packages.add(package)
+    build_py_command.distribution.packages = packages
+    build_py_command.packages = packages
 
 
 set_llvm_env = lambda path: set_env(
@@ -482,6 +539,13 @@ def get_spec_packages():
     yield "triton._C.libtriton"
     yield "triton.tools.triton_to_gluon_translater"
 
+    tle_include_dir = Path("python/triton/experimental/tle/language/include")
+    if tle_include_dir.is_dir():
+        # FlagCX headers are copied here while setup.py is running. The
+        # directory intentionally has no __init__.py, so find_packages cannot
+        # discover it even though setuptools includes it as package data.
+        yield "triton.experimental.tle.language.include"
+
     if flagtree_backend == "xpu":
         yield "triton.language.extra.xpu"
 
@@ -501,10 +565,20 @@ def get_excluded_package_data():
         "*.py[cod]",
         "**/*.py[cod]",
     ]
-    return {
+    excluded_package_data = {
         "": cache_patterns,
         "triton": ["spec/*"],
     }
+    if flagtree_backend not in ("", "nvidia", "tileir"):
+        excluded_package_data["triton.backends.nvidia"] = [
+            "bin/*",
+            "bin/**/*",
+            "include/*",
+            "include/**/*",
+            "lib/cupti/*",
+            "lib/cupti/**/*",
+        ]
+    return excluded_package_data
 
 
 class CommonUtils:
@@ -668,132 +742,3 @@ download_flagtree_third_party("tileir", condition=(flagtree_backend == "tileir")
 handle_flagtree_backend()
 
 register_backend_cache()
-
-# iluvatar
-cache.store(
-    file="iluvatar-llvm22-x86_64",
-    condition=("iluvatar" == flagtree_backend),
-    url="https://baai-cp-web.ks3-cn-beijing.ksyuncs.com/trans/iluvatar-llvm22-x86_64_v0.6.0.tar.gz",
-    pre_hook=lambda: check_env('LLVM_SYSPATH'),
-    post_hook=set_llvm_env,
-)
-
-# mthreads
-cache.store(
-    file="mthreads-llvm22",
-    condition=("mthreads" == flagtree_backend),
-    url="https://baai-cp-web.ks3-cn-beijing.ksyuncs.com/trans/mthreads-llvm22-x64_v0.5.1.tar.gz",
-    pre_hook=lambda: check_env('LLVM_SYSPATH'),
-    post_hook=set_llvm_env,
-)
-
-cache.store(file="mthreads_local_binary", condition=("mthreads" == flagtree_backend),
-            url="https://baai-cp-web.ks3-cn-beijing.ksyuncs.com/trans/mthreads_local_binary_v0.6.0.tar.gz")
-
-cache.store(files=("ld.lld", "llc"), condition=("mthreads" == flagtree_backend),
-            copy_src_path=f"{cache.dir_path}/{flagtree_backend}/mthreads_local_binary",
-            copy_dst_path=f"third_party/{flagtree_backend}/backend/bin")
-
-# ascend
-cache.store(
-    file="llvm-b5cc222d-ubuntu-arm64",
-    condition=("ascend" == flagtree_backend),
-    url="https://oaitriton.blob.core.windows.net/public/llvm-builds/llvm-b5cc222d-ubuntu-arm64.tar.gz",
-    pre_hook=lambda: check_env('LLVM_SYSPATH'),
-    post_hook=set_llvm_env,
-)
-
-# aipu
-cache.store(
-    file="llvm-a66376b0-ubuntu-x64-clang16-lld16",
-    condition=("aipu" == flagtree_backend),
-    url="https://baai-cp-web.ks3-cn-beijing.ksyuncs.com/trans/llvm-a66376b0-ubuntu-x64-clang16-lld16_v0.4.0.tar.gz",
-    pre_hook=lambda: check_env('LLVM_SYSPATH'),
-    post_hook=set_llvm_env,
-)
-
-# enflame
-cache.store(
-    file="llvm-fc83c68-gcc9-x64",
-    condition=("enflame" == flagtree_backend),
-    url="https://baai-cp-web.ks3-cn-beijing.ksyuncs.com/trans/enflame-llvm23-fc83c68-gcc9-x64_v0.4.0.tar.gz",
-    pre_hook=lambda: check_env('KURAMA_LLVM_DIR'),
-    post_hook=lambda path: set_env({
-        'KURAMA_LLVM_DIR': path,
-        'LLVM_INCLUDE_DIRS': Path(path) / "include",
-        'LLVM_LIBRARY_DIR': Path(path) / "lib",
-        'LLVM_SYSPATH': path,
-    }),
-)
-
-# tsingmicro
-cache.store(
-    file="tsingmicro-llvm21-glibc2.30-glibcxx3.4.28-python3.11-x64",
-    condition=("tsingmicro" == flagtree_backend),
-    url=
-    "https://baai-cp-web.ks3-cn-beijing.ksyuncs.com/trans/tsingmicro-llvm21-glibc2.30-glibcxx3.4.28-python3.11-x64_v0.2.0.tar.gz",
-    pre_hook=lambda: check_env('LLVM_SYSPATH'),
-    post_hook=set_llvm_env,
-)
-
-cache.store(
-    file="tx8_deps",
-    condition=("tsingmicro" == flagtree_backend),
-    url="https://baai-cp-web.ks3-cn-beijing.ksyuncs.com/trans/tx8_depends_release_20250814_195126_v0.2.0.tar.gz",
-    pre_hook=lambda: check_env('TX8_DEPS_ROOT'),
-    post_hook=lambda path: set_env({
-        'LLVM_SYSPATH': path,
-    }),
-)
-
-# hcu
-cache.store(
-    file="hcu-llvm22-b0ca808-glibc2.35-glibcxx3.4.30-ubuntu-x86_64",
-    condition=("hcu" == flagtree_backend),
-    url=
-    "https://baai-cp-web.ks3-cn-beijing.ksyuncs.com/trans/hcu-llvm22-b0ca808-glibc2.35-glibcxx3.4.30-ubuntu-x86_64_v0.5.0.tar.gz",
-    pre_hook=lambda: check_env('LLVM_SYSPATH'),
-    post_hook=set_llvm_env,
-)
-
-# metax
-cache.store(
-    file="metax-llvm19",
-    condition=("metax" == flagtree_backend),
-    url="https://baai-cp-web.ks3-cn-beijing.ksyuncs.com/trans/metax-llvm19-3.8.0.6-x86_64_v0.6.0.tar.gz",
-    pre_hook=lambda: check_env('LLVM_SYSPATH'),
-    post_hook=set_llvm_env,
-)
-
-cache.store(
-    file="metaxTritonPlugin.so",
-    condition=("metax" == flagtree_backend) and (not configs.flagtree_plugin),
-    url="https://baai-cp-web.ks3-cn-beijing.ksyuncs.com/trans/metaxTritonPlugin-cpython3.12-x86_64_v0.6.1.tar.gz",
-    copy_dst_path=f"third_party/{flagtree_backend}",
-    md5_digest="afb7ab8f",
-)
-
-# thrive
-cache.store(
-    file="llvm-f6ded0be-ubuntu-x64",
-    condition=("thrive" == flagtree_backend),
-    url="https://oaitriton.blob.core.windows.net/public/llvm-builds/llvm-f6ded0be-ubuntu-x64.tar.gz",
-    pre_hook=lambda: check_env('LLVM_SYSPATH'),
-    post_hook=set_llvm_env,
-)
-
-# sunrise
-cache.store(
-    file="sunrise_llvm22_dev_release",
-    condition=("sunrise" == flagtree_backend),
-    url="https://baai-cp-web.ks3-cn-beijing.ksyuncs.com/trans/llvm-1fdc1dfa-triton-v3.6.x.tar.gz",
-    pre_hook=lambda: check_env('LLVM_SYSPATH'),
-    post_hook=lambda path: [f(path) for f in (set_llvm_env, utils.activate("sunrise").sunrise_cp_bc_files)],
-)
-
-cache.store(
-    file="sunriseTritonPlugin.so",
-    condition=("sunrise" == flagtree_backend) and (not configs.flagtree_plugin),
-    url="https://baai-cp-web.ks3-cn-beijing.ksyuncs.com/trans/sunriseTritonPlugin_v0.6.0.tar.gz",
-    md5_digest="f3c65d44",
-)

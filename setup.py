@@ -417,6 +417,7 @@ class CMakeBuildPy(build_py):
         self.run_command('build_ext')
         helper.write_flagtree_backend_file()  # flagtree
         helper.overlay_backend_runtime_so(self, backends)  # flagtree
+        helper.refresh_generated_backend_packages(self, backends)  # flagtree
         ret = super().run()
         helper.write_backend_file_to_build_lib(self.build_lib)  # flagtree
         helper.write_backend_site_pth(self.build_lib)  # flagtree
@@ -713,7 +714,11 @@ def get_packages():
         if backend.is_external:
             yield f"triton.backends.{backend.name}"
         else:
-            for package, _source_dir in helper.get_backend_packages(backend):
+            backend_packages = [package for package, _source_dir in helper.get_backend_packages(backend)]
+            yield from backend_packages
+            for package in helper.get_generated_backend_packages(backend):
+                if package in set(backend_packages):
+                    continue
                 yield package
 
         if backend.language_dir:
@@ -730,6 +735,7 @@ def get_packages():
 
     if check_env_flag("TRITON_BUILD_PROTON", "ON"):  # Default ON
         yield "triton.profiler"
+        yield "triton.profiler.hooks"
 
 
 def add_link_to_backends(external_only):
