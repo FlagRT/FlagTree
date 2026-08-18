@@ -80,6 +80,34 @@ class pipeline(range):
         super().__init__(arg1, arg2, step, num_stages, loop_unroll_factor)
 
 
+@tl.builtin
+def set_layout(value, layout, _semantic=None):
+    """tle.gpu.set_layout op"""
+    layout = tl._unwrap_if_constexpr(layout)
+    if not hasattr(layout, "to_ir"):
+        raise ValueError(f"tle.gpu.set_layout expects a layout with to_ir(), got {type(layout)}")
+    if not isinstance(value, tl.tensor):
+        value = _semantic.to_tensor(value)
+    if not value.type.is_block():
+        raise ValueError("tle.gpu.set_layout only supports block tensors")
+    if not hasattr(_semantic.builder, "ensure_ttg_layout_attrs"):
+        raise RuntimeError("tle.gpu.set_layout requires a Triton build with __TLE__ explicit "
+                           "layout support (ir.builder.ensure_ttg_layout_attrs is missing). "
+                           "This backend likely uses its own TLE variant "
+                           "(e.g. __ILUVATAR_TLE__/__MCTLE__) that does not implement this op.")
+    options = _semantic.builder.options
+    _semantic.builder.ensure_ttg_layout_attrs(
+        int(getattr(options, "num_warps")),
+        int(getattr(options, "warp_size", 32)),
+        int(getattr(options, "num_ctas", 1)),
+    )
+    target_encoding = layout.to_ir(_semantic.builder)
+    return tl.tensor(
+        _semantic.builder.create_tle_gpu_set_layout(value.handle, target_encoding),
+        value.type,
+    )
+
+
 class range(_tl_range):
     """
     FlagTree/TLE extension of :func:`triton.language.range`.
